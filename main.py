@@ -25,22 +25,29 @@ def setup_logging(log_level: str = 'INFO') -> None:
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
     """
     log_format = (
-        '%(asctime)s - %(name)s - %(levelname)s - '
-        '%(funcName)s:%(lineno)d - %(message)s'
+        '%(asctime)s - %(levelname)s - %(name)s - %(message)s'
     )
     
-    # Create handlers
-    handlers = [
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('mywhoosh_to_garmin.log')
-    ]
+    # Get root logger and configure it
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
     
-    # Configure logging
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper(), logging.INFO),
-        format=log_format,
-        handlers=handlers
-    )
+    # Remove any existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Create formatter
+    formatter = logging.Formatter(log_format)
+    
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+    
+    # File handler
+    file_handler = logging.FileHandler('mywhoosh_to_garmin.log')
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
 
 
 def load_config() -> dict:
