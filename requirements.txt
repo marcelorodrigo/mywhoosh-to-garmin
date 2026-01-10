@@ -1,0 +1,4 @@
+requests==2.32.5
+garminconnect==0.2.38
+fit-tool==0.9.13
+python-dotenv==1.2.1
