@@ -2,14 +2,19 @@
 """
 MyWhoosh to Garmin Connect Activity Sync
 
-Fetches the latest activity from MyWhoosh, modifies the device type to Garmin Edge 840,
-and uploads it to Garmin Connect with automatic duplicate detection.
+Fetches activities from MyWhoosh, modifies the device type to Garmin Edge 840,
+and uploads them to Garmin Connect with automatic duplicate detection.
+
+Usage:
+    python main.py                  # Sync the latest activity
+    python main.py --batch 10       # Sync last 10 activities
 """
 
 import os
 import sys
 import logging
 import warnings
+import argparse
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -99,6 +104,23 @@ def main() -> int:
     Returns:
         Exit code (0=success, 1=failure, 2=config error)
     """
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description='Sync cycling activities from MyWhoosh to Garmin Connect'
+    )
+    parser.add_argument(
+        '--batch',
+        type=int,
+        metavar='COUNT',
+        help='Sync multiple activities (e.g., --batch 10). Omit to sync only latest.'
+    )
+    parser.add_argument(
+        '--no-duplicates',
+        action='store_true',
+        help='Skip duplicate checking (faster but may upload duplicates)'
+    )
+    args = parser.parse_args()
+    
     try:
         # Load configuration
         config = load_config()
@@ -139,7 +161,19 @@ def main() -> int:
             garmin_service
         )
         
-        success = processor.process_latest_activity(check_duplicates=True)
+        check_duplicates = not args.no_duplicates
+        
+        # Choose sync mode
+        if args.batch:
+            # Batch mode: sync multiple activities
+            stats = processor.process_multiple_activities(
+                limit=args.batch,
+                check_duplicates=check_duplicates
+            )
+            success = stats['synced'] > 0 and stats['errors'] == 0
+        else:
+            # Single activity mode: sync latest
+            success = processor.process_latest_activity(check_duplicates=check_duplicates)
         
         # Footer
         logger.info("")

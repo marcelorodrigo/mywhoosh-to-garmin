@@ -1,7 +1,7 @@
 """Activity processor for orchestrating the MyWhoosh to Garmin workflow."""
 
 import logging
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from services.mywhoosh_service import MyWhooshService
 from services.fit_file_service import FitFileService
@@ -194,3 +194,136 @@ class ActivityProcessor:
 
         self.logger.warning(f"Could not parse date: {date_str}")
         return None
+
+    def process_multiple_activities(self, limit: int = 10, check_duplicates: bool = True) -> dict:
+        """Process multiple activities from MyWhoosh to Garmin.
+
+        Args:
+            limit: Maximum number of activities to sync (default: 10)
+            check_duplicates: Whether to check for duplicate activities on Garmin
+
+        Returns:
+            Dictionary with sync statistics:
+                - 'total': Total activities processed
+                - 'synced': Successfully synced activities
+                - 'skipped': Skipped activities (duplicates or errors)
+                - 'errors': Activities that failed to sync
+        """
+        stats = {
+            'total': 0,
+            'synced': 0,
+            'skipped': 0,
+            'errors': 0
+        }
+
+        try:
+            # Header
+            self.logger.info("=" * 70)
+            self.logger.info("MyWhoosh to Garmin Connect - Batch Activity Sync")
+            self.logger.info("=" * 70)
+
+            # Step 1: Authenticate with services
+            self.logger.info("Step 1: Authenticating with services...")
+            self.mywhoosh_service.authenticate()
+            if check_duplicates:
+                self.garmin_service.authenticate()
+
+            # Step 2: Get all activities
+            self.logger.info(f"Step 2: Fetching activities (limit: {limit})...")
+            activities = self.mywhoosh_service.get_activities(limit=limit)
+
+            if not activities:
+                self.logger.info("No activities found - nothing to sync")
+                return stats
+
+            # Apply limit to activities list
+            activities = activities[:limit]
+            self.logger.info(f"Found {len(activities)} activities to process")
+
+            # Process each activity
+            for i, activity in enumerate(activities, 1):
+                try:
+                    self.logger.info(f"\n--- Processing activity {i}/{len(activities)} ---")
+                    stats['total'] += 1
+
+                    # Extract activity metadata
+                    activity_id = activity.get('id', activity.get('_id', 'unknown'))
+                    activity_name = activity.get('name', activity.get('title', 'Unknown Activity'))
+                    activity_date_str = (
+                        activity.get('date') or
+                        activity.get('startTime') or
+                        activity.get('createdAt') or
+                        activity.get('timestamp')
+                    )
+
+                    self.logger.info(f"Activity: {activity_name} (ID: {activity_id})")
+
+                    # Check for duplicates if enabled
+                    if check_duplicates:
+                        activity_date = self._parse_activity_date(activity_date_str)
+                        if activity_date:
+                            is_duplicate = self.garmin_service.check_duplicate_activity(
+                                activity_date,
+                                activity_name
+                            )
+                            if is_duplicate:
+                                self.logger.warning(f"⚠ Duplicate activity - skipping")
+                                stats['skipped'] += 1
+                                continue
+
+                    # Download and sync activity
+                    original_file_path = None
+                    modified_file_path = None
+
+                    try:
+                        # Download
+                        original_file_path = self.mywhoosh_service.download_activity(activity)
+                        self.logger.info(f"Downloaded FIT file")
+
+                        # Modify
+                        modified_file_path = self.fit_file_service.modify_device_info(original_file_path)
+                        self.logger.info(f"Modified FIT file")
+
+                        # Upload
+                        if not self.garmin_service.is_authenticated():
+                            self.garmin_service.authenticate()
+
+                        self.garmin_service.upload_activity(modified_file_path)
+                        self.logger.info(f"✓ Activity synced successfully")
+                        stats['synced'] += 1
+
+                    except Exception as e:
+                        self.logger.error(f"✗ Failed to sync activity: {e}")
+                        stats['errors'] += 1
+
+                    finally:
+                        # Cleanup temp files
+                        if original_file_path:
+                            self.fit_file_service.cleanup_file(original_file_path)
+                        if modified_file_path:
+                            self.fit_file_service.cleanup_file(modified_file_path)
+
+                except Exception as e:
+                    self.logger.error(f"Error processing activity: {e}")
+                    stats['errors'] += 1
+                    continue
+
+            # Summary
+            self.logger.info("\n" + "=" * 70)
+            self.logger.info("Batch Sync Summary")
+            self.logger.info("=" * 70)
+            self.logger.info(f"Total processed: {stats['total']}")
+            self.logger.info(f"Synced: {stats['synced']}")
+            self.logger.info(f"Skipped: {stats['skipped']}")
+            self.logger.info(f"Errors: {stats['errors']}")
+            self.logger.info("=" * 70)
+
+            return stats
+
+        except Exception as e:
+            self.logger.error("=" * 70)
+            self.logger.error("✗ Batch sync failed!")
+            self.logger.error("=" * 70)
+            self.logger.exception(f"Error: {e}")
+            return stats
+
