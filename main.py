@@ -2,15 +2,24 @@
 """
 MyWhoosh to Garmin Connect Activity Sync
 
-Fetches the latest activity from MyWhoosh, modifies the device type to Garmin Edge 840,
-and uploads it to Garmin Connect with automatic duplicate detection.
+Fetches activities from MyWhoosh, modifies the device type to Garmin Edge 840,
+and uploads them to Garmin Connect with automatic duplicate detection.
+
+Usage:
+    python main.py                  # Sync the latest activity
+    python main.py --batch 10       # Sync last 10 activities
 """
 
 import os
 import sys
 import logging
+import warnings
+import argparse
 from datetime import datetime
 from dotenv import load_dotenv
+
+# Suppress urllib3 LibreSSL warning on macOS
+warnings.filterwarnings('ignore', message='urllib3 v2 only supports OpenSSL 1.1.1+')
 
 from services.mywhoosh_service import MyWhooshService
 from services.fit_file_service import FitFileService
@@ -25,22 +34,29 @@ def setup_logging(log_level: str = 'INFO') -> None:
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
     """
     log_format = (
-        '%(asctime)s - %(name)s - %(levelname)s - '
-        '%(funcName)s:%(lineno)d - %(message)s'
+        '%(asctime)s - %(levelname)s - %(name)s - %(message)s'
     )
     
-    # Create handlers
-    handlers = [
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('mywhoosh_to_garmin.log')
-    ]
+    # Get root logger and configure it
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
     
-    # Configure logging
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper(), logging.INFO),
-        format=log_format,
-        handlers=handlers
-    )
+    # Remove any existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Create formatter
+    formatter = logging.Formatter(log_format)
+    
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+    
+    # File handler
+    file_handler = logging.FileHandler('mywhoosh_to_garmin.log')
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
 
 
 def load_config() -> dict:
@@ -88,6 +104,23 @@ def main() -> int:
     Returns:
         Exit code (0=success, 1=failure, 2=config error)
     """
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description='Sync cycling activities from MyWhoosh to Garmin Connect'
+    )
+    parser.add_argument(
+        '--batch',
+        type=int,
+        metavar='COUNT',
+        help='Sync multiple activities (e.g., --batch 10). Omit to sync only latest.'
+    )
+    parser.add_argument(
+        '--no-duplicates',
+        action='store_true',
+        help='Skip duplicate checking (faster but may upload duplicates)'
+    )
+    args = parser.parse_args()
+    
     try:
         # Load configuration
         config = load_config()
@@ -128,7 +161,19 @@ def main() -> int:
             garmin_service
         )
         
-        success = processor.process_latest_activity(check_duplicates=True)
+        check_duplicates = not args.no_duplicates
+        
+        # Choose sync mode
+        if args.batch:
+            # Batch mode: sync multiple activities
+            stats = processor.process_multiple_activities(
+                limit=args.batch,
+                check_duplicates=check_duplicates
+            )
+            success = stats['errors'] == 0 and (stats['synced'] > 0 or stats['skipped'] > 0)
+        else:
+            # Single activity mode: sync latest
+            success = processor.process_latest_activity(check_duplicates=check_duplicates)
         
         # Footer
         logger.info("")

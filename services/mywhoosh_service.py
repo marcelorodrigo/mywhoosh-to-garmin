@@ -104,9 +104,8 @@ class MyWhooshService:
 
         # Try different payload strategies
         payloads_to_try = [
-            {},  # Empty payload
-            {"limit": limit, "offset": 0},  # Simple pagination
-            {"page": 1, "limit": limit},  # Alternative pagination
+            {"page": 1, "limit": limit, "sortDate": "DESC"},  # Required sortDate parameter
+            {"page": 1, "limit": limit, "sortDate": "ASC"},
         ]
 
         last_error = None
@@ -126,18 +125,25 @@ class MyWhooshService:
                     data = response.json()
                     self.logger.debug(f"Response structure: {list(data.keys())}")
                     
-                    # Try to extract activities from various possible response structures
-                    activities = (
-                        data.get('activities') or 
-                        data.get('data') or 
-                        data.get('rides') or
-                        data.get('rideHistory') or
-                        []
-                    )
-                    
-                    # If data itself is a list, use it directly
+                    # Extract activities from response - handle new API structure
                     if isinstance(data, list):
                         activities = data
+                    elif isinstance(data, dict):
+                        # New API returns {data: {results: [...]}}
+                        if 'data' in data and isinstance(data['data'], dict):
+                            activities = data['data'].get('results', [])
+                        elif 'data' in data and isinstance(data['data'], list):
+                            activities = data['data']
+                        else:
+                            activities = (
+                                data.get('activities') or 
+                                data.get('results') or
+                                data.get('rides') or
+                                data.get('rideHistory') or
+                                []
+                            )
+                    else:
+                        activities = []
                     
                     self.logger.info(f"Found {len(activities)} activities")
                     return activities
@@ -209,70 +215,65 @@ class MyWhooshService:
             RuntimeError: If download fails
         """
         activity_id = activity.get('id', activity.get('_id', 'unknown'))
+        activity_file_id = activity.get('activityFileId')
         self.logger.info(f"Downloading activity {activity_id}...")
 
-        # Try to find download URL in various possible keys
-        download_url = (
-            activity.get('downloadUrl') or 
-            activity.get('fitFileUrl') or
-            activity.get('fileUrl') or
-            activity.get('s3Url') or
-            activity.get('fitFile')
-        )
-
-        # If no direct URL, try to construct it
-        if not download_url:
-            user_id = activity.get('userId', self.whoosh_id)
-            file_key = activity.get('fileKey') or activity.get('fitFileKey') or activity.get('key')
-            
-            if file_key:
-                # Try to construct S3 URL
-                # Note: This may need AWS signature - the activity might contain signed URL parts
-                download_url = f"https://mywhooshprod.s3.eu-west-1.amazonaws.com/ride/{user_id}/{file_key}"
-                self.logger.info(f"Constructed S3 URL: {download_url}")
-            else:
-                # Log the activity structure to help debug
-                self.logger.error(f"Cannot find download URL. Activity keys: {list(activity.keys())}")
-                raise ValueError(
-                    f"No download URL found in activity data. "
-                    f"Available keys: {list(activity.keys())}"
-                )
-
-        self.logger.info(f"Download URL: {download_url}")
-
+        if not self.access_token or not self.whoosh_id:
+            raise RuntimeError("Must authenticate before downloading activities")
+        
+        if not activity_file_id:
+            raise ValueError(f"Activity {activity_id} has no activityFileId")
+        
+        # Get presigned S3 URL from the download-activity-file API endpoint
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        
+        payload = {
+            "key": self.whoosh_id,
+            "fileId": activity_file_id
+        }
+        
         try:
-            # Download the file
+            response = requests.post(
+                "https://service14.mywhoosh.com/v2/rider/profile/download-activity-file",
+                json=payload,
+                headers=headers,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if data.get('error'):
+                raise RuntimeError(f"API error: {data.get('message')}")
+            
+            download_url = data.get('data')
+            if not isinstance(download_url, str) or not download_url.startswith('http'):
+                raise RuntimeError(f"Invalid download URL in response: {data}")
+                
+        except requests.RequestException as e:
+            raise RuntimeError(f"Failed to get download URL: {e}") from e
+
+        # Download the FIT file from S3
+        try:
             response = requests.get(download_url, timeout=60)
             response.raise_for_status()
 
             file_size = len(response.content)
             self.logger.info(f"Downloaded {file_size:,} bytes")
 
-            # Determine file extension from Content-Type or URL
-            content_type = response.headers.get('Content-Type', '')
-            is_dms = '.dms' in download_url.lower() or 'dms' in content_type.lower()
-
             # Save to temporary directory
             timestamp = int(time.time())
             temp_dir = tempfile.gettempdir()
-            
-            # Save with appropriate extension
-            if is_dms:
-                file_path = os.path.join(temp_dir, f"mywhoosh_{activity_id}_{timestamp}.dms")
-            else:
-                file_path = os.path.join(temp_dir, f"mywhoosh_{activity_id}_{timestamp}.fit")
+            file_path = os.path.join(temp_dir, f"mywhoosh_{activity_id}_{timestamp}.fit")
 
             with open(file_path, 'wb') as f:
                 f.write(response.content)
 
             self.logger.info(f"Saved to: {file_path}")
 
-            # If it's a .dms file, rename to .fit
-            if file_path.endswith('.dms'):
-                fit_file_path = file_path.replace('.dms', '.fit')
-                os.rename(file_path, fit_file_path)
-                self.logger.info(f"Renamed .dms to .fit: {fit_file_path}")
-                file_path = fit_file_path
 
             # Verify it's a valid FIT file
             with open(file_path, 'rb') as f:
