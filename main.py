@@ -9,8 +9,12 @@ and uploads it to Garmin Connect with automatic duplicate detection.
 import os
 import sys
 import logging
+import warnings
 from datetime import datetime
 from dotenv import load_dotenv
+
+# Suppress urllib3 LibreSSL warning on macOS
+warnings.filterwarnings('ignore', message='urllib3 v2 only supports OpenSSL 1.1.1+')
 
 from services.mywhoosh_service import MyWhooshService
 from services.fit_file_service import FitFileService
