@@ -1,7 +1,7 @@
 """Garmin service for handling authentication and activity uploads."""
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 from datetime import datetime
 from garminconnect import (
     Garmin,
@@ -9,6 +9,7 @@ from garminconnect import (
     GarminConnectTooManyRequestsError,
     GarminConnectConnectionError
 )
+from garth.exc import GarthHTTPError
 
 
 class GarminService:
@@ -55,17 +56,17 @@ class GarminService:
             self.logger.exception(f"Failed to login to Garmin Connect: {e}")
             raise RuntimeError(f"Authentication failed: {e}") from e
 
-    def upload_activity(self, fit_file_path: str) -> Dict[str, Any]:
+    def upload_activity(self, fit_file_path: str) -> Any:
         """Upload a .fit file to Garmin Connect.
 
         Args:
             fit_file_path: Path to the FIT file to upload
 
         Returns:
-            Upload response from Garmin Connect
+            Upload response from Garmin Connect or success dict if 409 Conflict (duplicate)
 
         Raises:
-            RuntimeError: If not authenticated or upload fails
+            RuntimeError: If not authenticated or upload fails (other than 409)
         """
         if not self._authenticated:
             raise RuntimeError("Must authenticate before uploading activities")
@@ -78,6 +79,14 @@ class GarminService:
             self.logger.debug(f"Upload response: {response}")
             return response
         except Exception as e:
+            error_str = str(e)
+            
+            # Handle 409 Conflict gracefully (activity already exists)
+            if "409" in error_str or "Conflict" in error_str:
+                self.logger.info("⚠ Activity already exists on Garmin Connect (409 Conflict)")
+                self.logger.info("Treating as success - no duplicate upload needed")
+                return {"status": "skipped", "message": "Activity already exists on Garmin Connect"}
+            
             self.logger.exception(f"Failed to upload activity: {e}")
             raise RuntimeError(f"Upload failed: {e}") from e
 

@@ -151,13 +151,24 @@ class ActivityProcessor:
         """Parse activity date from various possible formats.
 
         Args:
-            date_str: Date string in various formats
+            date_str: Date string in various formats (ISO, timestamp, etc.)
 
         Returns:
             datetime object or None if parsing fails
         """
         if not date_str:
             return None
+
+        # Try parsing as Unix timestamp (numeric)
+        try:
+            timestamp = float(date_str)
+            # Timestamps are typically in seconds, but could be milliseconds
+            # If > 100 billion, likely milliseconds
+            if timestamp > 100_000_000_000:
+                timestamp = timestamp / 1000
+            return datetime.fromtimestamp(timestamp)
+        except (ValueError, AttributeError, OSError):
+            pass
 
         # Try different date formats
         date_formats = [
