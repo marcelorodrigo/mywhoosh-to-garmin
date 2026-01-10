@@ -1,7 +1,7 @@
 """Activity processor for orchestrating the MyWhoosh to Garmin workflow."""
 
 import logging
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
 from services.mywhoosh_service import MyWhooshService
 from services.fit_file_service import FitFileService
@@ -267,7 +267,7 @@ class ActivityProcessor:
                                 activity_name
                             )
                             if is_duplicate:
-                                self.logger.warning(f"⚠ Duplicate activity - skipping")
+                                self.logger.warning("⚠ Duplicate activity - skipping")
                                 stats['skipped'] += 1
                                 continue
 
@@ -278,22 +278,22 @@ class ActivityProcessor:
                     try:
                         # Download
                         original_file_path = self.mywhoosh_service.download_activity(activity)
-                        self.logger.info(f"Downloaded FIT file")
+                        self.logger.info("Downloaded FIT file")
 
                         # Modify
                         modified_file_path = self.fit_file_service.modify_device_info(original_file_path)
-                        self.logger.info(f"Modified FIT file")
+                        self.logger.info("Modified FIT file")
 
                         # Upload
                         if not self.garmin_service.is_authenticated():
                             self.garmin_service.authenticate()
 
                         self.garmin_service.upload_activity(modified_file_path)
-                        self.logger.info(f"✓ Activity synced successfully")
+                        self.logger.info("✓ Activity synced successfully")
                         stats['synced'] += 1
 
                     except Exception as e:
-                        self.logger.error(f"✗ Failed to sync activity: {e}")
+                        self.logger.exception(f"✗ Failed to sync activity: {e}")
                         stats['errors'] += 1
 
                     finally:
@@ -304,7 +304,7 @@ class ActivityProcessor:
                             self.fit_file_service.cleanup_file(modified_file_path)
 
                 except Exception as e:
-                    self.logger.error(f"Error processing activity: {e}")
+                    self.logger.exception(f"Error processing activity: {e}")
                     stats['errors'] += 1
                     continue
 
