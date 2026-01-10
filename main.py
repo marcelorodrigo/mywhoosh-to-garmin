@@ -170,7 +170,7 @@ def main() -> int:
                 limit=args.batch,
                 check_duplicates=check_duplicates
             )
-            success = stats['synced'] > 0 and stats['errors'] == 0
+            success = stats['errors'] == 0 and (stats['synced'] > 0 or stats['skipped'] > 0)
         else:
             # Single activity mode: sync latest
             success = processor.process_latest_activity(check_duplicates=check_duplicates)
