@@ -274,12 +274,6 @@ class MyWhooshService:
 
             self.logger.info(f"Saved to: {file_path}")
 
-            # If it's a .dms file, rename to .fit
-            if file_path.endswith('.dms'):
-                fit_file_path = file_path.replace('.dms', '.fit')
-                os.rename(file_path, fit_file_path)
-                self.logger.info(f"Renamed .dms to .fit: {fit_file_path}")
-                file_path = fit_file_path
 
             # Verify it's a valid FIT file
             with open(file_path, 'rb') as f:
