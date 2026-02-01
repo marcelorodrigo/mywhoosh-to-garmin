@@ -1,0 +1,25 @@
+name: Build
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          show-progress: false
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.13.11
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run tests with pytest
+        run: pytest --cov=services --cov-report=xml --cov-report=term-missing --junit-xml=test-results.xml
