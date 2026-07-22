@@ -5,4 +5,4 @@ python-dotenv==1.2.1
 
 # Testing dependencies
 pytest==9.0.3
-pytest-cov==7.0.0
+pytest-cov==7.1.0
