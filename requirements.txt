@@ -1,7 +1,7 @@
 requests==2.34.2
 garminconnect==0.2.38
 fit-tool==0.9.15
-python-dotenv==1.2.2
+python-dotenv==1.2.3
 
 # Testing dependencies
 pytest==9.1.1
